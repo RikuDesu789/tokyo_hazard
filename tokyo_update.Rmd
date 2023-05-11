@@ -1,0 +1,323 @@
+---
+title: "tokyo_update"
+author: "Riku"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(igraph)
+library(dplyr)
+library(NipponMap)
+library(ggplot2)
+library(sp)
+library(raster)
+library(broom)
+install.packages("remotes")
+remotes::install_github("uribo/jpndistrict")
+library(jpndistrict)
+library(maps)
+library(rgdal)
+library(leaflet)
+library(intergraph)
+library(cluster)
+library(factoextra)
+library(ggplot2)
+library(dplyr)
+```
+
+```{r}
+# Data Processing and Cleaning
+node_list <- read.csv("~/Downloads/dataset_code/node_list_elevation_shelter.csv")
+edge_list <- read.csv("~/Downloads/dataset_code/edge_list.csv")
+
+tokyo_node <- node_list[,-1]
+tokyo_edge <- edge_list[,-1]
+
+tokyo_node <- tokyo_node[!duplicated(tokyo_node$station_name),]
+tokyo_stations <- graph_from_data_frame(tokyo_edge, vertices = tokyo_node, directed = FALSE)
+
+network <- get.data.frame(tokyo_stations, "both")
+
+vert <- network$vertices
+coordinates(vert) <- ~ lon +lat
+
+edges <- network$edges
+edges <- lapply(1:nrow(edges), function(i) {
+  as(rbind(vert[vert$name == edges[i, "from"], ],
+           vert[vert$name == edges[i, "to"], ]),
+     "SpatialLines")
+  }
+)
+
+for (i in seq_along(edges)) {
+  edges[[i]] <- spChFIDs(edges[[i]], as.character(i))
+}
+
+edges <- do.call(rbind, edges)
+
+japan_lat <- 138.129731
+japan_lon <- 38.0615855
+
+tokyo_map <- jpn_pref(13)
+
+tokyo_map <- filter(tokyo_map, city_code < 13361)
+
+leaflet(vert) %>% 
+  setView(lng = japan_lat, lat = japan_lon, zoom = 6) %>%
+  addPolygons(
+    data = tokyo_map,
+    fillColor = "White",
+    fillOpacity = 1,
+    stroke = TRUE,
+    color = "Gray",
+    opacity = 1,
+    weight = 1.5,
+    label = tokyo_map$city) %>% 
+  addPolylines(data = edges, 
+               color = "orange",
+               weight = 2,
+               opacity = 0.5) %>%
+  addCircles(data = vert,
+             weight = 1,
+             label = node_list$station_name,
+             color = "blue",
+             opacity = 0.6)
+```
+
+```{r}
+# Data Visualization
+# Create leaflet map based on betweenness
+library(statnet)
+
+tokyo_stations_net <- asNetwork(tokyo_stations)
+betweenness <- betweenness(tokyo_stations_net, gmode = "graph")
+
+leaflet(vert) %>% 
+  setView(lng = japan_lat, lat = japan_lon, zoom = 6) %>%
+  addPolygons(
+    data = tokyo_map,
+    fillColor = "White",
+    fillOpacity = 1,
+    stroke = TRUE,
+    color = "Gray",
+    opacity = 1,
+    weight = 1.5,
+    label = tokyo_map$city) %>% 
+  addPolylines(data = edges, 
+               color = "orange",
+               weight = 2,
+               opacity = 0.5) %>%
+  addCircles(data = vert_between,
+             weight = vert_between$between/5000,
+             label = vert_between$name,
+             color = "blue",
+             opacity = 0.6)
+```
+
+
+```{r}
+# Data Visualization
+# Create leaflet map based on elevation of each stations
+library(statnet)
+
+tokyo_stations_net <- asNetwork(tokyo_stations)
+betweenness <- betweenness(tokyo_stations_net, gmode = "graph")
+
+leaflet(vert) %>% 
+  setView(lng = japan_lat, lat = japan_lon, zoom = 6) %>%
+  addPolygons(
+    data = tokyo_map,
+    fillColor = "White",
+    fillOpacity = 1,
+    stroke = TRUE,
+    color = "Gray",
+    opacity = 1,
+    weight = 1.5,
+    label = tokyo_map$city) %>% 
+  addPolylines(data = edges, 
+               color = "orange",
+               weight = 2,
+               opacity = 0.5) %>%
+  addCircles(data = vert_between,
+             weight = scale(vert_between$elevation)*3,
+             label = vert_between$name,
+             color = "blue",
+             opacity = 0.6)
+```
+
+```{r}
+# Data Visualization
+# Create leaflet map based on shelter count within 1500m radius of each stations
+library(statnet)
+
+tokyo_stations_net <- asNetwork(tokyo_stations)
+betweenness <- betweenness(tokyo_stations_net, gmode = "graph")
+
+leaflet(vert) %>% 
+  setView(lng = japan_lat, lat = japan_lon, zoom = 6) %>%
+  addPolygons(
+    data = tokyo_map,
+    fillColor = "White",
+    fillOpacity = 1,
+    stroke = TRUE,
+    color = "Gray",
+    opacity = 1,
+    weight = 1.5,
+    label = tokyo_map$city) %>% 
+  addPolylines(data = edges, 
+               color = "orange",
+               weight = 2,
+               opacity = 0.5) %>%
+  addCircles(data = vert_between,
+             weight = vert_between$shelter_count_1500/2,
+             label = vert_between$name,
+             color = "blue",
+             opacity = 0.6)
+```
+
+```{r}
+#Data Processing
+# standarize data
+vert_between_std <- vert_between
+vert_between_std@data$elevation <- scale(vert_between_std@data$elevation)
+vert_between_std@data$shelter_count_1500 <- scale(vert_between_std@data$shelter_count_1500)
+vert_between_std@data$between <- scale(vert_between_std@data$between)
+vert_between_std@data$name <- vert_between$name
+
+# add critical score column and check for the top 10 
+vert_between_std@data$critical_score <- vert_between_std@data$elevation + vert_between_std@data$shelter_count_1500 + vert_between_std@data$between
+vert_between_std@data <- vert_between_std@data[order(-vert_between_std@data$critical_score),]
+```
+
+```{r}
+# Data Visualization
+# Create leaflet map based on critical score of each stations
+library(statnet)
+
+tokyo_stations_net <- asNetwork(tokyo_stations)
+betweenness <- betweenness(tokyo_stations_net, gmode = "graph")
+
+leaflet(vert) %>% 
+  setView(lng = japan_lat, lat = japan_lon, zoom = 6) %>%
+  addPolygons(
+    data = tokyo_map,
+    fillColor = "White",
+    fillOpacity = 1,
+    stroke = TRUE,
+    color = "Gray",
+    opacity = 1,
+    weight = 1.5,
+    label = tokyo_map$city) %>% 
+  addPolylines(data = edges, 
+               color = "orange",
+               weight = 2,
+               opacity = 0.5) %>%
+  addCircles(data = vert_between_std,
+             weight = scale(vert_between_std$critical_score)*3,
+             label = vert_between_std$name,
+             color = "blue",
+             opacity = 0.6)
+```
+
+```{r}
+#Modeling (clusterization)
+vert_std = vert_between_std@data
+row.names(vert_std) <- vert_std$name
+vert_std <- subset(vert_std, select = -c(name))
+vert_std_subset_std <- vert_std[c("elevation", "shelter_count_1500", "between")]
+fviz_nbclust(vert_std_subset_std, FUNcluster = kmeans, method = "silhouette", k.max = 8)
+
+#PAM clustering
+tokyo_pam <- pam(vert_std_subset_std, k = 6) 
+tokyo_pam$medoids  
+fviz_cluster(tokyo_pam, stand = FALSE)
+```
+
+```{r}
+#Modeling (Structural Equivalence)
+detach(igraph)
+library(statnet)
+
+tokyo_edge_str <- tokyo_edge[,-3]
+tokyo_edge_str <- distinct(tokyo_edge_str, from, to, .keep_all = TRUE)
+str_equi <- network(tokyo_edge_str)
+
+euclidian <- as.data.frame(sedist(str_equi,
+       method = "euclidean",
+       mode = "graph"))
+
+colnames(euclidian) = network.vertex.names(str_equi)
+rownames(euclidian) = network.vertex.names(str_equi)
+View(euclidian)
+
+head(vert_between_std@data, 10)["name"]
+
+euclidian_top10 <- euclidian[rownames(euclidian) %in% as.vector(head(vert_between_std@data$name, 10)), ]
+euclidian_top10[euclidian_top10 == 0] <- Inf
+min_col_indices <- apply(euclidian_top10, 1, which.min)
+min_col_names <- colnames(euclidian_top10)[min_col_indices]
+structure_top10 <- data.frame(top10_station = row.names(euclidian_top10), equivalent_station = min_col_names)
+temp = vert_between@data
+
+# add color variable for visualization
+temp$color <- "Grey"
+for (i in 1:nrow(temp)) {
+  if (temp$name[i] %in% structure_top10$top10_station) {
+    temp$color[i] <- "Red"
+  }
+  else if (temp$name[i] %in% structure_top10$equivalent_station) {
+    temp$color[i] <- "Blue"
+  }
+}
+
+# add weight variable for visualization
+temp$weight <- 1
+for (i in 1:nrow(temp)) {
+  if (temp$name[i] %in% structure_top10$top10_station) {
+    temp$weight[i] <- 6
+  }
+  else if (temp$name[i] %in% structure_top10$equivalent_station) {
+    temp$weight[i] <- 6
+  }
+}
+
+# add label variable for visualization
+temp$label <- ""
+for (i in 1:nrow(temp)) {
+  if (temp$name[i] %in% structure_top10$top10_station) {
+    temp$label[i] <- temp$name[i] 
+  }
+  else if (temp$name[i] %in% structure_top10$equivalent_station) {
+    temp$label[i] <- temp$name[i]
+  }
+}
+
+vert_between@data$color = temp$color
+vert_between@data$weight = temp$weight
+vert_between@data$label = temp$label
+
+leaflet(vert) %>% 
+  setView(lng = japan_lat, lat = japan_lon, zoom = 6) %>%
+  addPolygons(
+    data = tokyo_map,
+    fillColor = "White",
+    fillOpacity = 1,
+    stroke = TRUE,
+    color = "Gray",
+    opacity = 1,
+    weight = 1.5,
+    label = tokyo_map$city) %>% 
+  addPolylines(data = edges, 
+               color = "Grey",
+               weight = 2,
+               opacity = 0.5) %>%
+  addCircles(data = vert_between,
+             weight = vert_between$weight,
+             label = vert_between$name,
+             color = vert_between$color,
+             opacity = 0.6) %>% 
+  addCircleMarkers(stroke = FALSE, label = vert_between$label,fillOpacity = 0.0, labelOptions = labelOptions(noHide = TRUE, offset=c(3,-5), textOnly = TRUE)) 
+```
+
+
